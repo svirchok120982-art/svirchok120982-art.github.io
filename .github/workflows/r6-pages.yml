@@ -1,0 +1,68 @@
+name: R6 Synthetic Source — Manual GitHub Pages Stage
+
+on:
+  workflow_dispatch:
+    inputs:
+      stage:
+        description: 'The single synthetic state to publish; verify before live fetch'
+        required: true
+        type: choice
+        default: 01-first
+        options:
+          - 01-first
+          - 02-repeat
+          - 03-price
+          - 04-disappear
+          - 05-same-name
+          - 06-rename
+          - 07-owner-link
+
+permissions:
+  contents: read
+  actions: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: r6-controlled-pages
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    # Never deploy from a project repository, private ResortOS, PR, or non-default branch.
+    if: >-
+      github.event_name == 'workflow_dispatch' &&
+      github.ref == 'refs/heads/main' &&
+      github.event.repository.name == format('{0}.github.io', github.repository_owner)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 12
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Checkout only the independent public synthetic site repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Use pinned official Node (no mirror and no implicit pnpm cache)
+        uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5.0.0
+        with:
+          node-version: '24.21.0'
+          package-manager-cache: false
+      - name: Test all seven synthetic source transitions and deployment policy
+        run: node --test tools/r6-controlled-source/verify.test.mjs
+      - name: Render exactly the manually selected synthetic stage
+        env:
+          R6_STAGE: ${{ inputs.stage }}
+        run: |
+          node tools/r6-controlled-source/render.mjs "$R6_STAGE" "$RUNNER_TEMP/r6-site"
+          node tools/r6-controlled-source/verify-site.mjs "$RUNNER_TEMP/r6-site" "$R6_STAGE"
+      - name: Configure GitHub Pages
+        uses: actions/configure-pages@45bfe0192ca1faeb007ade9deae92b16b8254a0d # v6.0.0
+      - name: Upload the complete freshly generated static site (removed files stay removed)
+        uses: actions/upload-pages-artifact@fc324d3547104276b827a68afc52ff2a11cc49c9 # v5.0.0
+        with:
+          path: ${{ runner.temp }}/r6-site
+      - name: Deploy only to this public GitHub Pages user-site
+        id: deployment
+        uses: actions/deploy-pages@368f82528645a54fb793d4d04e342629a3f51346 # v5.0.1
